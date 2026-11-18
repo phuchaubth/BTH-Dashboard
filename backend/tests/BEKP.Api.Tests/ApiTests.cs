@@ -205,3 +205,43 @@ public sealed class ApiTests : IClassFixture<ApiFactory>
         return client;
     }
 }
+
+public sealed class WindowsGroupRoleTransformationTests
+{
+    [Fact]
+    public async Task MapsActiveDirectoryGroupsToBekpRoles()
+    {
+        var settings = Microsoft.Extensions.Options.Options.Create(new BEKP.Api.Security.BekpAuthenticationOptions
+        {
+            WindowsViewerGroups = [@"BV\BEKP-Viewers"],
+            WindowsIntegrationGroups = [@"BV\BEKP-Integration"],
+        });
+        var transformation = new BEKP.Api.Security.WindowsGroupRoleTransformation(settings);
+        var windowsLike = new System.Security.Claims.ClaimsIdentity(
+            [new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Name, @"BV\dieu.duong"), new System.Security.Claims.Claim("group", @"BV\BEKP-Viewers")],
+            "Negotiate",
+            System.Security.Claims.ClaimTypes.Name,
+            "group");
+
+        var principal = await transformation.TransformAsync(new System.Security.Claims.ClaimsPrincipal(windowsLike));
+
+        Assert.True(principal.IsInRole(BekpRoles.DashboardViewer));
+        Assert.False(principal.IsInRole(BekpRoles.Integration));
+        Assert.False(principal.IsInRole(BekpRoles.Administrator));
+        Assert.Same(principal, await transformation.TransformAsync(principal));
+        Assert.Equal(2, principal.Identities.Count());
+    }
+
+    [Fact]
+    public void WindowsMode_RequiresAtLeastOneGroup()
+    {
+        using var misconfigured = new WebApplicationFactory<Program>().WithWebHostBuilder(b =>
+        {
+            b.UseEnvironment("Production");
+            b.UseSetting("Authentication:Mode", "Windows");
+        });
+
+        var ex = Assert.ThrowsAny<Exception>(() => misconfigured.CreateClient());
+        Assert.Contains("WindowsViewerGroups", ex.ToString(), StringComparison.Ordinal);
+    }
+}

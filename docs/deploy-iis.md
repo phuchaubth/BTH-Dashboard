@@ -1,103 +1,72 @@
-# Triển khai BEKP trên IIS + SQL Server
+# Cài đặt BEKP trên IIS (chung máy chủ với app Giấy đồng thuận)
 
-Mô hình: **một site IIS** chạy ASP.NET Core (in-process). Site này phục vụ API `/api`, realtime `/hubs/dashboard` và giao diện React (thư mục `wwwroot`). Database riêng `BEKP` nằm trên SQL Server dùng chung với app Giấy đồng thuận.
+BEKP chạy trên **cùng máy chủ IIS và cùng SQL Server** với app Giấy đồng thuận, nhưng là một ứng dụng riêng: site IIS, Application Pool, thư mục, database và repo/nhánh mã nguồn đều tách biệt. Toàn bộ thao tác trên IIS đã gói trong `scripts/iis/Install-BekpSite.ps1`.
 
-## 1. Chuẩn bị máy chủ (một lần)
+| Thành phần | Giấy đồng thuận | BEKP |
+|---|---|---|
+| Site / Application Pool | giữ nguyên | `BEKP` / `BEKP` (No Managed Code) |
+| Thư mục | giữ nguyên | `D:\Sites\BEKP` |
+| Database | giữ nguyên | `BEKP` (schema `bekp`) |
+| Đăng nhập | — | Windows (nhóm AD) hoặc JWT/OIDC |
 
-1. Windows Server có IIS 10.
-2. Bật tính năng **IIS → Application Development → WebSocket Protocol** (bắt buộc cho realtime SignalR).
-3. Cài **ASP.NET Core 10.0 Hosting Bundle**, sau đó chạy `iisreset`.
-4. Chứng chỉ HTTPS cho tên miền nội bộ (ví dụ `bekp.benhvien.local`).
+## 1. Lấy gói
 
-## 2. Database (DBA)
+Có hai cách:
+- **Tải từ CI:** GitHub → Actions → CI → artifact `bekp-iis`.
+- **Tự build:** `./scripts/publish-iis.ps1 -Output C:\Setup\bekp-iis`, rồi nén thư mục thành `bekp-iis.zip`.
 
-```sql
-CREATE DATABASE BEKP;
-GO
--- Chạy script idempotent trong repo:
--- database/migrations/001_initial_inpatient_operations.sql
-```
+Trong gói có thư mục `_setup` chứa các file cài đặt: `Install-BekpSite.ps1`, `Restore-BekpBackup.ps1`, `create-database.sql`, `master-data-departments.sql` và các migration.
 
-Khuyến nghị dùng **Windows Authentication** bằng danh tính Application Pool, để không lưu mật khẩu trong cấu hình:
+## 2. Máy chủ (một lần)
 
-```sql
-CREATE LOGIN [IIS APPPOOL\BEKP] FROM WINDOWS;   -- nếu SQL Server cùng máy; khác máy: dùng tài khoản dịch vụ domain
-USE BEKP;
-CREATE USER [IIS APPPOOL\BEKP] FOR LOGIN [IIS APPPOOL\BEKP];
-ALTER ROLE db_datareader ADD MEMBER [IIS APPPOOL\BEKP];
-ALTER ROLE db_datawriter ADD MEMBER [IIS APPPOOL\BEKP];
-```
+Cài ASP.NET Core 10.0 Hosting Bundle và bật tính năng WebSocket (`Install-WindowsFeature Web-WebSockets`). Sau đó chạy `net stop was /y` rồi `net start w3svc`.
 
-Nếu SQL Server nằm trên máy khác, đặt Application Pool chạy bằng một **tài khoản dịch vụ domain** (gMSA được khuyến nghị) và cấp quyền cho tài khoản đó.
+Bước này **làm gián đoạn app Giấy đồng thuận khoảng 1–5 phút**, nên làm ngoài giờ cao điểm.
 
-## 3. Đóng gói
+## 3. Database (DBA)
 
-Trên máy build (cần .NET SDK 10 và Node.js ≥ 22 với npm ≥ 11):
+1. Chạy `create-database.sql` (thay `<LOGIN>` = `IIS APPPOOL\BEKP` khi SQL Server cùng máy, hoặc tài khoản dịch vụ domain/gMSA khi khác máy).
+2. Trên database `BEKP`, chạy migration `001_initial_inpatient_operations.sql`.
+3. Sửa bảng `@Khoa` trong `master-data-departments.sql` cho đúng danh mục khoa/giường, rồi chạy.
+4. Thêm database `BEKP` vào kế hoạch sao lưu.
+
+## 4. Cài site (PowerShell, chạy bằng quyền Administrator)
 
 ```powershell
-# Site riêng (https://bekp.benhvien.local/)
-./scripts/publish-iis.ps1 -Output C:\deploy\bekp
-
-# Hoặc sub-application (https://intranet.benhvien.local/bekp/)
-./scripts/publish-iis.ps1 -Output C:\deploy\bekp -BasePath /bekp/
+Set-ExecutionPolicy -Scope Process Bypass -Force
+cd C:\Setup\_setup
+.\Install-BekpSite.ps1 -PackagePath C:\Setup\bekp-iis.zip -PhysicalPath D:\Sites\BEKP `
+  -HostName bekp.benhvien.local -Port 443 -CertificateThumbprint '<thumbprint>' `
+  -ConnectionString 'Server=SQLSRV01;Database=BEKP;Integrated Security=true;Encrypt=true' `
+  -AuthMode Windows -ViewerGroups 'BV\BEKP-Viewers' -IntegrationGroups 'BV\BEKP-Integration' -AdminGroups 'BV\BEKP-Admins'
 ```
 
-Thư mục kết quả chứa `BEKP.Api.dll`, `web.config`, `wwwroot/` (giao diện) và `logs/`.
+- **Không có host name riêng:** dùng `-HostName '' -Port 8443`. Không sửa binding của app Giấy đồng thuận.
+- **SQL Server ở máy khác:** thêm `-AppPoolAccount 'BV\svc-bekp$'`.
+- **Dùng SSO/OIDC thay cho Windows:** `-AuthMode Jwt -JwtAuthority <url> -JwtAudience bekp-api`.
+- **Site demo:** cài site riêng trỏ vào database `BEKP_DEMO` và thêm `-DemoData`. **Không bao giờ** dùng `-DemoData` trên database `BEKP` thật.
 
-## 4. Tạo site / Application Pool
+Cấu hình được ghi vào `applicationHost.config`, không nằm trong gói. Vì vậy cập nhật phiên bản không ghi đè cấu hình, và không có bí mật nào nằm trong repo.
 
-```powershell
-Import-Module WebAdministration
-New-WebAppPool -Name "BEKP"
-Set-ItemProperty IIS:\AppPools\BEKP -Name managedRuntimeVersion -Value ""      # No Managed Code
-Set-ItemProperty IIS:\AppPools\BEKP -Name startMode -Value AlwaysRunning
-Set-ItemProperty IIS:\AppPools\BEKP -Name processModel.idleTimeout -Value "00:00:00"   # giữ kết nối realtime
+## 5. Kiểm tra
 
-# Site riêng:
-New-Website -Name "BEKP" -PhysicalPath "D:\sites\bekp" -ApplicationPool "BEKP" -Port 443 -Ssl -HostHeader "bekp.benhvien.local"
-# hoặc sub-application trong site có sẵn:
-# New-WebApplication -Site "Default Web Site" -Name "bekp" -PhysicalPath "D:\sites\bekp" -ApplicationPool "BEKP"
-```
+- `/health` trả về `Healthy`.
+- Trang `/` hiện **Trực tuyến**, đủ danh sách khoa.
+- Tài khoản không thuộc nhóm nào gọi API bị trả 403.
+- Tài khoản dịch vụ HIS gọi `PUT /api/inpatient/departments/DEP-0001/beds/201-1/status` bằng `-UseDefaultCredentials` thì dashboard cập nhật ngay.
+- App Giấy đồng thuận vẫn hoạt động bình thường.
 
-Sao chép nội dung `C:\deploy\bekp` vào `D:\sites\bekp`. Cấp quyền đọc cho `IIS APPPOOL\BEKP`, và quyền ghi cho thư mục `logs`.
+## 6. Cập nhật / quay lui
 
-## 5. Cấu hình (không ghi bí mật vào web.config)
+- **Cập nhật:** chạy lại `Install-BekpSite.ps1 -PackagePath <gói mới> -PhysicalPath D:\Sites\BEKP -HostName …`. Script tự bật trang bảo trì, sao lưu bản cũ sang `D:\Sites\BEKP.backup-<ngày giờ>`, rồi giữ nguyên cấu hình.
+- **Quay lui:** chạy `Restore-BekpBackup.ps1`. Nếu bản lỗi đã chạy migration database thì DBA khôi phục database tương ứng.
 
-Biến môi trường được lưu trong `applicationHost.config` của máy chủ, nên các lần deploy sau không ghi đè:
+## Xử lý sự cố nhanh
 
-```powershell
-$appcmd = "$env:windir\system32\inetsrv\appcmd.exe"
-$site = "BEKP"   # hoặc "Default Web Site/bekp"
-& $appcmd set config $site -section:system.webServer/aspNetCore /+"environmentVariables.[name='ConnectionStrings__Bekp',value='Server=SQLSRV01;Database=BEKP;Integrated Security=true;Encrypt=true']" /commit:apphost
-& $appcmd set config $site -section:system.webServer/aspNetCore /+"environmentVariables.[name='Authentication__Authority',value='https://sso.benhvien.local/realms/bv']" /commit:apphost
-& $appcmd set config $site -section:system.webServer/aspNetCore /+"environmentVariables.[name='Authentication__Audience',value='bekp-api']" /commit:apphost
-```
-
-Tùy chọn (ví dụ mục tiêu thời gian theo quy định đã được Phòng QLCL xác nhận):
-
-```powershell
-& $appcmd set config $site -section:system.webServer/aspNetCore /+"environmentVariables.[name='TimeStandards__Standards__BloodIssueEmergency__TargetMinutes',value='30']" /commit:apphost
-& $appcmd set config $site -section:system.webServer/aspNetCore /+"environmentVariables.[name='TimeStandards__Standards__BloodIssueEmergency__Reference',value='<số hiệu văn bản>']" /commit:apphost
-& $appcmd set config $site -section:system.webServer/aspNetCore /+"environmentVariables.[name='TimeStandards__Standards__BloodIssueEmergency__ReferenceConfirmed',value='true']" /commit:apphost
-```
-
-`web.config` mặc định đặt `ASPNETCORE_ENVIRONMENT=Production`. Ở môi trường này, ứng dụng **từ chối** tài khoản dev, seeder và bộ mô phỏng. Muốn dựng **site demo**, đặt `ASPNETCORE_ENVIRONMENT=Staging` cùng `Database__SeedSyntheticData=true` và `Simulation__Enabled=true`.
-
-## 6. Kiểm tra sau triển khai
-
-- `https://bekp.benhvien.local/health` → `Healthy`.
-- Mở `/`: biểu tượng trạng thái ở góc trên phải hiện **Trực tuyến**. Nếu hiện "Mất kết nối", kiểm tra lại tính năng WebSocket Protocol.
-- Gọi `/api/dashboard/overview` khi chưa có token → `401`.
-
-## 7. Cập nhật phiên bản
-
-1. Chạy lại `publish-iis.ps1`.
-2. Đặt file `app_offline.htm` vào thư mục site (IIS sẽ dừng ứng dụng).
-3. Sao chép các file mới, rồi xóa `app_offline.htm`.
-4. Nếu có migration mới, DBA chạy script trong `database/migrations/` trước.
-
-## Ghi chú
-
-- Realtime dùng WebSocket. Nếu có proxy hoặc tường lửa đứng giữa, phải cho phép header `Upgrade` tới đường dẫn `/hubs/`.
-- Log lỗi khởi động: tạm đặt `stdoutLogEnabled="true"` trong `web.config` và xem thư mục `logs/` (nhớ tắt lại sau khi xử lý).
-- Ứng dụng chạy in-process nên mỗi Application Pool chỉ host **một** ứng dụng ASP.NET Core.
+| Lỗi | Xử lý |
+|---|---|
+| 500.19 | Cài lại hoặc chọn Repair Hosting Bundle, rồi `net stop was /y` và `net start w3svc` |
+| 500.30 / 500.31 | Xem Event Viewer → Application (*IIS AspNetCore Module V2*): thường do thiếu cấu hình hoặc sai chuỗi kết nối |
+| Luôn hiện "Mất kết nối" | Bật WebSocket; cho phép header `Upgrade` tới `/hubs/` |
+| Trình duyệt hỏi mật khẩu liên tục | Thêm host BEKP vào vùng Local intranet bằng GPO |
+| API trả 403 | Thêm người dùng vào nhóm AD, rồi đăng nhập lại Windows |

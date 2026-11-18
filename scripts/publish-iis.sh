@@ -11,4 +11,7 @@ base="${2:-/}"
 dotnet publish "$root/backend/BEKP.Api/BEKP.Api.csproj" -c Release -o "$output"
 mkdir -p "$output/wwwroot" "$output/logs"
 cp -R "$root/frontend/dist/." "$output/wwwroot/"
+# Installation helpers travel with the package (not served: only wwwroot is public).
+mkdir -p "$output/_setup"
+cp "$root"/scripts/iis/* "$root"/database/migrations/*.sql "$output/_setup/"
 echo "IIS package ready: $output"

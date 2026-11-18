@@ -63,7 +63,7 @@ Một site IIS duy nhất: API ASP.NET Core (in-process) phục vụ luôn giao 
 # Sub-application /bekp:   ./scripts/publish-iis.ps1 -Output C:\deploy\bekp -BasePath /bekp/
 ```
 
-Hướng dẫn từng bước (Hosting Bundle, Application Pool, WebSocket, chuỗi kết nối Windows Authentication, HTTPS, migration): **[docs/deploy-iis.md](docs/deploy-iis.md)**.
+Cài đặt chung máy chủ với app Giấy đồng thuận (site, pool, database riêng) bằng `scripts/iis/Install-BekpSite.ps1`; hướng dẫn: **[docs/deploy-iis.md](docs/deploy-iis.md)**. Danh mục khoa/giường ban đầu: `scripts/iis/master-data-departments.sql`.
 
 ## Xác thực & phân quyền (RBAC)
 
@@ -73,7 +73,8 @@ Hướng dẫn từng bước (Hosting Bundle, Application Pool, WebSocket, chu�
 | `bekp.integration` | Gửi sự kiện từ HIS / LIS / ngân hàng máu (`Inpatient.Write`) |
 | `bekp.admin` | Cả hai |
 
-- Mặc định `Authentication:Mode=Jwt`: bắt buộc cấu hình `Authentication:Authority` và `Authentication:Audience` (OpenID Connect). Thiếu cấu hình → API không khởi động.
+- `Authentication:Mode=Windows` (khuyến nghị cho intranet IIS): IIS xác thực tài khoản domain; nhóm AD trong `Authentication:WindowsViewerGroups` / `WindowsIntegrationGroups` / `WindowsAdminGroups` được ánh xạ sang vai trò BEKP.
+- `Authentication:Mode=Jwt` (mặc định của mã nguồn): bắt buộc cấu hình `Authentication:Authority` và `Authentication:Audience` (OpenID Connect). Thiếu cấu hình → API không khởi động.
 - `Authentication:Mode=Development` chỉ được phép khi `ASPNETCORE_ENVIRONMENT=Development` (ứng dụng từ chối khởi động ở môi trường khác).
 - Mọi endpoint mặc định yêu cầu đăng nhập; chỉ `/health` cho phép ẩn danh.
 - Mọi thao tác ghi được ghi audit (`BEKP.Audit`): người thực hiện, hành động, mã đối tượng, thời điểm UTC.

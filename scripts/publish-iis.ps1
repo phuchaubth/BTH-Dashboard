@@ -41,4 +41,10 @@ New-Item -ItemType Directory -Force -Path $wwwroot | Out-Null
 Copy-Item -Path (Join-Path $root "frontend/dist/*") -Destination $wwwroot -Recurse -Force
 New-Item -ItemType Directory -Force -Path (Join-Path $Output "logs") | Out-Null
 
+# Installation helpers travel with the package (not served: only wwwroot is public).
+$setup = Join-Path $Output "_setup"
+New-Item -ItemType Directory -Force -Path $setup | Out-Null
+Copy-Item -Path (Join-Path $root "scripts/iis/*") -Destination $setup -Force
+Copy-Item -Path (Join-Path $root "database/migrations/*.sql") -Destination $setup -Force
+
 Write-Host "IIS package ready: $Output"

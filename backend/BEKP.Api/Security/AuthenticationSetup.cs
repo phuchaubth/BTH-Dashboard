@@ -9,7 +9,10 @@ public sealed class BekpAuthenticationOptions
 {
     public const string SectionName = "Authentication";
 
-    /// <summary>"Jwt" (default, OpenID Connect provider) or "Development" (local only, fixed developer identity).</summary>
+    /// <summary>
+    /// "Jwt" (default, OpenID Connect provider), "Windows" (IIS Windows Authentication, roles from Active Directory groups)
+    /// or "Development" (local only, fixed developer identity).
+    /// </summary>
     public string Mode { get; set; } = "Jwt";
 
     public string? Authority { get; set; }
@@ -22,6 +25,15 @@ public sealed class BekpAuthenticationOptions
     public bool RequireHttpsMetadata { get; set; } = true;
 
     public string[] DevelopmentRoles { get; set; } = [BekpRoles.DashboardViewer, BekpRoles.Integration];
+
+    /// <summary>Windows mode: AD groups (DOMAIN\Group) granted the dashboard viewer role.</summary>
+    public string[] WindowsViewerGroups { get; set; } = [];
+
+    /// <summary>Windows mode: AD groups or service accounts' groups granted the integration role (HIS/LIS/blood bank).</summary>
+    public string[] WindowsIntegrationGroups { get; set; } = [];
+
+    /// <summary>Windows mode: AD groups granted the administrator role.</summary>
+    public string[] WindowsAdminGroups { get; set; } = [];
 }
 
 internal static class AuthenticationSetup
@@ -41,6 +53,18 @@ internal static class AuthenticationSetup
             services.Configure<BekpAuthenticationOptions>(configuration.GetSection(BekpAuthenticationOptions.SectionName));
             services.AddAuthentication(DevelopmentAuthenticationHandler.SchemeName)
                 .AddScheme<AuthenticationSchemeOptions, DevelopmentAuthenticationHandler>(DevelopmentAuthenticationHandler.SchemeName, null);
+        }
+        else if (string.Equals(settings.Mode, "Windows", StringComparison.OrdinalIgnoreCase))
+        {
+            if (settings.WindowsViewerGroups.Length == 0 && settings.WindowsAdminGroups.Length == 0)
+            {
+                throw new InvalidOperationException("Authentication:Mode=Windows requires Authentication:WindowsViewerGroups or WindowsAdminGroups.");
+            }
+
+            // IIS performs Windows Authentication (Kerberos/NTLM); ASP.NET Core maps AD groups to BEKP roles.
+            services.Configure<BekpAuthenticationOptions>(configuration.GetSection(BekpAuthenticationOptions.SectionName));
+            services.AddAuthentication(Microsoft.AspNetCore.Server.IISIntegration.IISDefaults.AuthenticationScheme);
+            services.AddTransient<Microsoft.AspNetCore.Authentication.IClaimsTransformation, WindowsGroupRoleTransformation>();
         }
         else
         {
