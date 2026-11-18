@@ -6,9 +6,9 @@ This repository contains the BTH Enterprise Knowledge Platform (BEKP), a hospita
 
 ## Technology stack
 
-- Backend: ASP.NET Core 9 Web API
+- Backend: ASP.NET Core 10 Web API (.NET 10)
 - Architecture: Clean Architecture
-- Database: PostgreSQL
+- Database: Microsoft SQL Server (separate "BEKP" database on the shared hospital SQL Server)
 - ORM: Entity Framework Core
 - Frontend: React, TypeScript, Vite
 - UI: Material UI

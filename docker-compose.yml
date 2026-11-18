@@ -1,0 +1,45 @@
+# Local demo stack: SQL Server (optional), API and web.
+# Production: point BEKP_CONNECTION_STRING at the shared hospital SQL Server (separate "BEKP" database),
+# set BEKP_ENVIRONMENT=Production and configure JWT (BEKP_AUTH_AUTHORITY / BEKP_AUTH_AUDIENCE).
+name: bekp
+
+services:
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    profiles: ["local-db"]
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: Developer
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:?Set MSSQL_SA_PASSWORD in .env}
+    ports:
+      - "127.0.0.1:1433:1433"
+    volumes:
+      - sqlserver-data:/var/opt/mssql
+
+  api:
+    build: ./backend
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${BEKP_ENVIRONMENT:-Development}
+      ConnectionStrings__Bekp: ${BEKP_CONNECTION_STRING:?Set BEKP_CONNECTION_STRING in .env}
+      Authentication__Authority: ${BEKP_AUTH_AUTHORITY:-}
+      Authentication__Audience: ${BEKP_AUTH_AUDIENCE:-}
+      Database__ApplyMigrationsOnStartup: ${BEKP_APPLY_MIGRATIONS:-true}
+      Database__SeedSyntheticData: ${BEKP_SEED_SYNTHETIC_DATA:-true}
+      Simulation__Enabled: ${BEKP_SIMULATION:-true}
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  web:
+    build: ./frontend
+    depends_on:
+      - api
+    ports:
+      - "127.0.0.1:8080:8080"
+
+volumes:
+  sqlserver-data:
