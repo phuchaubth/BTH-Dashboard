@@ -50,6 +50,19 @@ if (!app.Environment.IsDevelopment())
     app.UseHsts();
 }
 
+// The React app (frontend/dist) is published into wwwroot so IIS serves UI, API and SignalR from one site.
+app.UseDefaultFiles();
+app.UseStaticFiles(new StaticFileOptions
+{
+    OnPrepareResponse = context =>
+    {
+        if (context.Context.Request.Path.StartsWithSegments("/assets", StringComparison.OrdinalIgnoreCase))
+        {
+            context.Context.Response.Headers.CacheControl = "public, max-age=31536000, immutable";
+        }
+    },
+});
+
 app.UseCors();
 app.UseAuthentication();
 app.UseAuthorization();
@@ -57,6 +70,10 @@ app.UseAuthorization();
 app.MapControllers();
 app.MapHub<DashboardHub>(DashboardHub.Path);
 app.MapHealthChecks("/health").AllowAnonymous();
+
+// Unknown API routes stay API errors; every other route returns the SPA shell (client-side routing).
+app.Map("/api/{**rest}", () => Results.NotFound());
+app.MapFallbackToFile("index.html").AllowAnonymous();
 
 await app.RunAsync().ConfigureAwait(false);
 

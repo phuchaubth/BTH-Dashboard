@@ -4,7 +4,11 @@ import react from '@vitejs/plugin-react';
 
 const apiTarget = process.env.BEKP_API_URL ?? 'http://localhost:5080';
 
+// IIS sub-application support, e.g. VITE_BASE_PATH=/bekp/ when the site is https://server/bekp.
+const basePath = process.env.VITE_BASE_PATH ?? '/';
+
 export default defineConfig({
+  base: basePath.endsWith('/') ? basePath : `${basePath}/`,
   plugins: [react()],
   server: {
     port: 5173,

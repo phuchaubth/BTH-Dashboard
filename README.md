@@ -15,7 +15,7 @@ BTH Enterprise Knowledge Platform (BEKP). Phân hệ đầu tiên: **dashboard q
 ## Kiến trúc
 
 ```
-backend/   ASP.NET Core 10 Web API – Clean Architecture
+backend/   ASP.NET Core 10 Web API – Clean Architecture (web.config cho IIS trong BEKP.Api)
   BEKP.Domain          Thực thể & quy tắc nghiệp vụ (không phụ thuộc tầng nào)
   BEKP.Application     Use case, DTO, cổng (interface) – chỉ phụ thuộc Domain + Shared
   BEKP.Persistence     EF Core + SQL Server (schema "bekp"), repository, migration, seeder mô phỏng
@@ -26,7 +26,7 @@ backend/   ASP.NET Core 10 Web API – Clean Architecture
 frontend/  React 19 + TypeScript + Vite + MUI + TanStack Query + SignalR client
 database/  Script SQL migration (idempotent) cho DBA
 docs/      Tài liệu thiết kế
-scripts/   check.sh – chạy toàn bộ kiểm tra
+scripts/   check.sh – chạy toàn bộ kiểm tra; publish-iis.ps1 / publish-iis.sh – đóng gói triển khai IIS
 ```
 
 **Realtime:** mọi thay đổi (nhập/ra viện, trạng thái giường, sốt giảm BC, yêu cầu máu, tồn kho) đi qua API tích hợp → lưu DB → ghi `OperationalEvent` → phát qua SignalR (`/hubs/dashboard`). Trình duyệt nhận sự kiện, làm mới đúng truy vấn bị ảnh hưởng; nếu mất kết nối, tự cập nhật mỗi 60 giây.
@@ -36,29 +36,34 @@ scripts/   check.sh – chạy toàn bộ kiểm tra
 SQL Server, **database riêng `BEKP`** trên cùng máy chủ SQL với app Giấy đồng thuận. Bảng nằm trong schema `bekp`. Chuỗi kết nối **chỉ** truyền qua biến môi trường `ConnectionStrings__Bekp` (không commit).
 
 - Phát triển: `Database__ApplyMigrationsOnStartup=true` tự áp migration.
-- Production: DBA chạy `database/migrations/*.sql` (idempotent) hoặc `dotnet ef database update`; tạo login riêng, quyền tối thiểu trên database `BEKP`.
+- Production: DBA chạy `database/migrations/*.sql` (idempotent); khuyến nghị đăng nhập SQL bằng Windows Authentication của Application Pool IIS (`IIS APPPOOL\BEKP`), quyền tối thiểu trên database `BEKP`.
 
-## Chạy local
+## Chạy local (máy phát triển)
 
-Yêu cầu: .NET SDK 10, Node.js ≥ 22 với **npm ≥ 11**, SQL Server (có sẵn hoặc container).
+Yêu cầu: .NET SDK 10, Node.js ≥ 22 với **npm ≥ 11**, SQL Server (Developer/Express/LocalDB hoặc máy chủ dùng chung – database riêng `BEKP`).
 
-```bash
-# 1) SQL Server local (tùy chọn) – đặt mật khẩu mạnh trong .env
-cp .env.example .env              # sửa các giá trị CHANGE_ME
-docker compose --profile local-db up -d sqlserver
-
-# 2) Backend (Development: tài khoản dev cục bộ, seed dữ liệu mô phỏng, bộ mô phỏng sự kiện)
+```powershell
+# 1) Backend – Development: tài khoản dev cục bộ, tự áp migration, seed dữ liệu mô phỏng, bộ mô phỏng sự kiện
 cd backend
-export ConnectionStrings__Bekp="Server=localhost,1433;Database=BEKP;User Id=sa;Password=<mật khẩu>;TrustServerCertificate=true"
+$env:ConnectionStrings__Bekp = "Server=(localdb)\MSSQLLocalDB;Database=BEKP;Integrated Security=true;TrustServerCertificate=true"
 dotnet run --project BEKP.Api      # http://localhost:5080
 
-# 3) Frontend
+# 2) Frontend
 cd ../frontend
 npm ci
 npm run dev                        # http://localhost:5173 (proxy /api, /hubs → :5080)
 ```
 
-Hoặc toàn bộ bằng Docker: `docker compose --profile local-db up --build` → http://localhost:8080
+## Triển khai IIS (không dùng Docker)
+
+Một site IIS duy nhất: API ASP.NET Core (in-process) phục vụ luôn giao diện React trong `wwwroot`, SignalR chạy qua WebSocket của IIS – không cần ARR/URL Rewrite.
+
+```powershell
+# Site riêng:              ./scripts/publish-iis.ps1 -Output C:\deploy\bekp
+# Sub-application /bekp:   ./scripts/publish-iis.ps1 -Output C:\deploy\bekp -BasePath /bekp/
+```
+
+Hướng dẫn từng bước (Hosting Bundle, Application Pool, WebSocket, chuỗi kết nối Windows Authentication, HTTPS, migration): **[docs/deploy-iis.md](docs/deploy-iis.md)**.
 
 ## Xác thực & phân quyền (RBAC)
 
@@ -103,12 +108,13 @@ Enum dạng chuỗi camelCase (ví dụ `"careLevel": "level2"`), thời gian IS
 | `Database__SeedSyntheticData` | `false` | Seed dữ liệu mô phỏng (bị từ chối ở Production) |
 | `Simulation__Enabled` | `false` | Sinh sự kiện mô phỏng (bị từ chối ở Production) |
 | `TimeStandards__Standards__<Loại>__TargetMinutes` / `__Reference` / `__ReferenceConfirmed` | mục tiêu tạm | Mục tiêu thời gian và văn bản căn cứ (BYT / nội bộ) |
-| `Cors__AllowedOrigins__0` | — | Origin frontend khi khác domain |
+| `Cors__AllowedOrigins__0` | — | Chỉ cần khi frontend chạy khác domain (mặc định cùng site IIS) |
 
 ## Kiểm tra chất lượng
 
 ```bash
-./scripts/check.sh   # build + test backend, lint + test + build frontend, kiểm tra docker compose
+./scripts/check.sh   # build + test backend, lint + test + build frontend
+./scripts/publish-iis.sh /tmp/bekp-iis /   # kiểm tra gói triển khai IIS
 ```
 
 ## Hạn chế đã biết
@@ -118,3 +124,4 @@ Enum dạng chuỗi camelCase (ví dụ `"careLevel": "level2"`), thời gian IS
 - Chưa có báo cáo phản ứng truyền máu (huyết cảnh giác) và dữ liệu nhân lực ca trực.
 - Frontend chưa tích hợp đăng nhập OIDC (đã có điểm cắm `setAccessTokenProvider`).
 - Audit log hiện ghi ra log có cấu trúc; lưu trữ bền vững sẽ bổ sung sau.
+- Font Be Vietnam Pro tải từ Google Fonts; nếu máy chủ/máy trạm không ra Internet, giao diện dùng font hệ thống thay thế.

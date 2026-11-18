@@ -143,6 +143,26 @@ public sealed class ApiTests : IClassFixture<ApiFactory>
     }
 
     [Fact]
+    public async Task UnknownApiRoute_IsNotServedAsSpa()
+    {
+        var response = await Client(BekpRoles.DashboardViewer).GetAsync(new Uri("/api/does-not-exist", UriKind.Relative));
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.NotEqual("text/html", response.Content.Headers.ContentType?.MediaType);
+        Assert.Contains("default-src 'none'", response.Headers.GetValues("Content-Security-Policy").Single(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SpaRoutes_AreAnonymous_WithBrowserContentSecurityPolicy()
+    {
+        // The SPA shell carries no data; wwwroot is only populated by the IIS publish package.
+        var response = await factory.CreateClient().GetAsync(new Uri("/departments/DEP-0001", UriKind.Relative));
+        Assert.NotEqual(HttpStatusCode.Unauthorized, response.StatusCode);
+        var csp = response.Headers.GetValues("Content-Security-Policy").Single();
+        Assert.Contains("default-src 'self'", csp, StringComparison.Ordinal);
+        Assert.Contains("frame-ancestors 'none'", csp, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void DevelopmentAuthentication_IsRefusedOutsideDevelopment()
     {
         using var unsafeFactory = new WebApplicationFactory<Program>().WithWebHostBuilder(b =>

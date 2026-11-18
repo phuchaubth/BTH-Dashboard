@@ -1,6 +1,7 @@
 import { CssBaseline, ThemeProvider } from '@mui/material';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { routerBasename } from './lib/basePath';
 import { DepartmentIndexRedirect, DepartmentPage } from './pages/DepartmentPage';
 import { OverviewPage } from './pages/OverviewPage';
 import { WallboardPage } from './pages/WallboardPage';
@@ -19,7 +20,7 @@ export function App() {
       <RealtimeProvider>
         <ThemeProvider theme={lightTheme}>
           <CssBaseline />
-          <BrowserRouter>
+          <BrowserRouter basename={routerBasename() || undefined}>
             <Routes>
               <Route path="/" element={<OverviewPage />} />
               <Route path="/departments" element={<DepartmentIndexRedirect />} />

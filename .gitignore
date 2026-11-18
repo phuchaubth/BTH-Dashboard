@@ -17,3 +17,6 @@ coverage/
 .vs/
 .idea/
 .DS_Store
+
+# Publish output
+artifacts/

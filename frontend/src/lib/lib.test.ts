@@ -114,3 +114,14 @@ describe('ui helpers', () => {
     expect(matchesFilter(free, 'neutropenic')).toBe(false);
   });
 });
+
+describe('base path (IIS sub-application)', () => {
+  it('prefixes API and hub URLs', async () => {
+    const { appUrl, routerBasename } = await import('./basePath');
+    expect(appUrl('/api/dashboard/overview', '/')).toBe('/api/dashboard/overview');
+    expect(appUrl('/api/dashboard/overview', '/bekp/')).toBe('/bekp/api/dashboard/overview');
+    expect(appUrl('/hubs/dashboard', '/bekp')).toBe('/bekp/hubs/dashboard');
+    expect(routerBasename('/')).toBe('');
+    expect(routerBasename('/bekp/')).toBe('/bekp');
+  });
+});

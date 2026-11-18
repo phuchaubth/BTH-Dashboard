@@ -2,6 +2,7 @@ import { HubConnectionBuilder, HubConnectionState, LogLevel } from '@microsoft/s
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { getAccessToken } from '../api/client';
+import { appUrl } from '../lib/basePath';
 import type { OperationalEvent } from '../api/types';
 import { RealtimeContext, type ConnectionStatus } from './context';
 
@@ -9,7 +10,7 @@ const MAX_LIVE_EVENTS = 40;
 const INVALIDATE_DEBOUNCE_MS = 400;
 
 /** Single SignalR connection per tab. Each pushed event refreshes the affected dashboard queries. */
-export function RealtimeProvider({ children, hubUrl = '/hubs/dashboard' }: { children: ReactNode; hubUrl?: string }) {
+export function RealtimeProvider({ children, hubUrl = appUrl('/hubs/dashboard') }: { children: ReactNode; hubUrl?: string }) {
   const queryClient = useQueryClient();
   const [status, setStatus] = useState<ConnectionStatus>('connecting');
   const [events, setEvents] = useState<OperationalEvent[]>([]);
